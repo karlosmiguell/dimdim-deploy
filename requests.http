@@ -1,0 +1,48 @@
+# Testes da API (extensao "REST Client" do VS Code: clique em "Send Request")
+# Troque pela URL do seu Web App.
+@base = https://app-dimdim-seunome.azurewebsites.net
+
+### Saude da aplicacao e do banco
+GET {{base}}/health
+
+### Criar usuario
+POST {{base}}/api/usuarios
+Content-Type: application/json
+
+{ "nome": "Carlos" }
+
+### Listar usuarios
+GET {{base}}/api/usuarios
+
+### Entrada de dinheiro
+POST {{base}}/api/usuarios/1/transacoes
+Content-Type: application/json
+
+{ "tipo": "entrada", "valor": 500 }
+
+### Saida de dinheiro
+POST {{base}}/api/usuarios/1/transacoes
+Content-Type: application/json
+
+{ "tipo": "saida", "valor": 200 }
+
+### Extrato do usuario
+GET {{base}}/api/usuarios/1
+
+### Cadastrar produto em falta
+POST {{base}}/api/out_stock
+Content-Type: application/json
+
+{ "codigo": "A001", "descricao": "Parafuso M6", "data_solicitacao": "2026-09-28" }
+
+### Listar produtos em falta
+GET {{base}}/api/out_stock
+
+### Atualizar produto
+PUT {{base}}/api/out_stock/1
+Content-Type: application/json
+
+{ "codigo": "A001", "descricao": "Parafuso M6 inox", "data_solicitacao": "2026-09-29" }
+
+### Remover produto
+DELETE {{base}}/api/out_stock/1

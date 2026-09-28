@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DimDim - Deploy Python no Azure</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="topbar">
+        <div class="brand">
+            <img src="{{ url_for('static', filename='fiap-logo.png') }}" alt="FIAP" class="logo-img">
+            <span class="tag">DevOps & Cloud</span>
+        </div>
+        <nav>
+            <a href="#usuarios">Usuários</a>
+            <a href="#estoque">Estoque</a>
+            <a href="/health" target="_blank">/health</a>
+        </nav>
+    </div>
+
+    <header class="hero">
+        <div class="hero-inner">
+            <h1>Dim<span>Dim</span> 💸</h1>
+            <p class="subtitle">Deploy de Python no Azure App Service + Azure SQL, via Azure CLI</p>
+            <div class="pills">
+                <span class="pill pink">☁️ Azure App Service</span>
+                <span class="pill {{ 'ok' if banco_configurado else 'warn' }}">🗄️ Azure SQL{{ '' if banco_configurado else ' (não configurado)' }}</span>
+                <span class="pill" id="healthPill"><span class="dot"></span> verificando banco...</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="wrap">
+        <section class="card">
+            <h3>🔎 Onde estou rodando?</h3>
+            <p class="lead">Dados lidos do servidor. Depois de um redeploy, repare que o container muda e os dados continuam.</p>
+            <div class="info-grid">
+                <div><small>Web App</small><strong>{{ site }}</strong></div>
+                <div><small>Container</small><strong>{{ host }}</strong></div>
+                <div><small>Python</small><strong>{{ python_versao }}</strong></div>
+                <div><small>Azure SQL</small><strong>{{ servidor_sql.split('.')[0] if banco_configurado else 'não configurado' }}</strong></div>
+            </div>
+            {% if not banco_configurado %}
+            <div class="warning-line">⚠️ Banco não configurado. Crie o Azure SQL e defina <code>SQL_SERVER</code>, <code>SQL_USER</code> e <code>SQL_PASSWORD</code> nas App Settings (aula 2).</div>
+            {% endif %}
+        </section>
+
+        <section class="card">
+            <h3>🚀 Como este app chega na nuvem</h3>
+            <p class="lead">API Flask com uma página web: usuários com entradas e saídas de dinheiro e controle de produtos em falta.</p>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <div class="step-body">
+                        <h4>Código Python</h4>
+                        <p>Flask 3 + SQLAlchemy 2. O <code>requirements.txt</code> lista as dependências e o <code>/health</code> mostra se o banco responde.</p>
+                        <div class="chips"><span class="chip new">Python 3.12</span><span class="chip new">Flask 3</span><span class="chip new">SQLAlchemy 2</span><span class="chip new">pyodbc</span></div>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <div class="step-body">
+                        <h4>Azure CLI</h4>
+                        <p>Tudo é criado por linha de comando: <code>az group create</code>, <code>az webapp up</code>, <code>az sql server create</code>, <code>az sql db create</code>.</p>
+                        <div class="chips"><span class="chip new">Resource Group</span><span class="chip new">App Service Plan F1</span><span class="chip new">Azure CLI</span></div>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <div class="step-body">
+                        <h4>Azure App Service</h4>
+                        <p>O deploy envia o código, o Oryx roda o <code>pip install</code> no Azure e o app sobe com <code>gunicorn app:app</code> num container Linux.</p>
+                        <div class="chips"><span class="chip new">Web App Linux</span><span class="chip new">Oryx</span><span class="chip new">gunicorn</span></div>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">4</div>
+                    <div class="step-body">
+                        <h4>Azure SQL Database</h4>
+                        <p>A conexão vem das <strong>App Settings</strong> (variáveis de ambiente). Nenhuma senha fica no código, e os dados sobrevivem a restarts e redeploys.</p>
+                        <div class="chips"><span class="chip new">Azure SQL</span><span class="chip new">App Settings</span><span class="chip new">Firewall</span><span class="chip new">TLS</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card" id="usuarios">
+            <h3>👤 Usuários e transações</h3>
+            <p class="lead">Entradas somam ao saldo e saídas subtraem. O saldo não pode ficar negativo.</p>
+
+            <div class="section-label">Novo usuário</div>
+            <form class="form-row" id="formUsuario">
+                <input name="nome" placeholder="Nome completo" required>
+                <button class="btn btn-primary">Criar usuário</button>
+            </form>
+
+            <div class="section-label">Nova transação</div>
+            <form class="form-row" id="formTransacao">
+                <select name="usuario_id" id="selUsuario" required></select>
+                <select name="tipo">
+                    <option value="entrada">⬆️ Entrada</option>
+                    <option value="saida">⬇️ Saída</option>
+                </select>
+                <input name="valor" type="number" step="0.01" min="0.01" placeholder="Valor (R$)" required>
+                <button class="btn btn-primary">Lançar</button>
+            </form>
+
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>ID</th><th>Nome</th><th>Saldo</th></tr></thead>
+                    <tbody id="listaUsuarios"></tbody>
+                </table>
+            </div>
+
+            <div class="section-label" style="margin-top:20px">Extrato de <span id="nomeExtrato">-</span></div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Data</th><th>Tipo</th><th>Valor</th></tr></thead>
+                    <tbody id="listaExtrato"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="card" id="estoque">
+            <h3>📦 Produtos em falta</h3>
+            <p class="lead">Cadastro de produtos que precisam ser repostos (tabela <code>out_stock</code>).</p>
+            <form class="form-row" id="formProduto">
+                <input name="codigo" placeholder="Código" required>
+                <input name="descricao" placeholder="Descrição" required>
+                <input name="data_solicitacao" type="date">
+                <button class="btn btn-primary">Adicionar</button>
+            </form>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>ID</th><th>Código</th><th>Descrição</th><th>Solicitado em</th><th></th></tr></thead>
+                    <tbody id="listaProdutos"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <footer class="site-footer">
+        FIAP · DevOps & Cloud · Deploy de Python com Azure CLI ·
+        <a href="/health" target="_blank">/health</a>
+    </footer>
+
+    <div id="statusMessage"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const brl = (v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const dataBR = (s) => new Date(s.length === 10 ? s + "T00:00:00" : s).toLocaleString("pt-BR",
+    s.length === 10 ? { dateStyle: "short" } : { dateStyle: "short", timeStyle: "short" });
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const vazio = (cols, txt) => `<tr><td class="empty" colspan="${cols}">${txt}</td></tr>`;
+
+let timer;
+function aviso(texto, tipo = "success") {
+    const el = $("#statusMessage");
+    el.textContent = texto;
+    el.className = tipo;
+    clearTimeout(timer);
+    timer = setTimeout(() => (el.className = ""), 3500);
+}
+
+async function api(url, opts = {}) {
+    const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
+    const dados = await r.json().catch(() => ({}));
+    if (!r.ok) {
+        aviso("❌ " + (dados.erro || "Erro " + r.status), "error");
+        throw new Error(dados.erro);
+    }
+    return dados;
+}
+
+async function checarSaude() {
+    const pill = $("#healthPill");
+    try {
+        const r = await fetch("/health");
+        const h = await r.json();
+        pill.className = "pill " + (h.banco_conectado ? "ok" : h.banco_configurado ? "bad" : "warn");
+        pill.innerHTML = `<span class="dot"></span> ${h.banco_conectado ? "banco conectado"
+            : h.banco_configurado ? "banco indisponível" : "aguardando App Settings"}`;
+    } catch {
+        pill.className = "pill bad";
+        pill.innerHTML = '<span class="dot"></span> sem resposta';
+    }
+}
+
+async function carregarExtrato() {
+    const id = $("#selUsuario").value;
+    if (!id) {
+        $("#nomeExtrato").textContent = "-";
+        $("#listaExtrato").innerHTML = vazio(3, "Crie um usuário para ver o extrato.");
+        return;
+    }
+    const u = await api(`/api/usuarios/${id}`);
+    $("#nomeExtrato").textContent = u.nome;
+    $("#listaExtrato").innerHTML = u.transacoes.length
+        ? u.transacoes.slice().reverse().map((t) => `<tr><td>${dataBR(t.data)}</td>
+            <td>${t.tipo === "entrada" ? "⬆️ Entrada" : "⬇️ Saída"}</td>
+            <td class="money ${t.tipo === "saida" ? "neg" : ""}">${t.tipo === "saida" ? "-" : ""}${brl(t.valor)}</td></tr>`).join("")
+        : vazio(3, "Nenhuma transação ainda.");
+}
+
+async function carregarUsuarios() {
+    const atual = $("#selUsuario").value;
+    const usuarios = await api("/api/usuarios");
+    $("#listaUsuarios").innerHTML = usuarios.length
+        ? usuarios.map((u) => `<tr><td>${u.id}</td><td>${esc(u.nome)}</td><td class="money">${brl(u.saldo)}</td></tr>`).join("")
+        : vazio(3, "Nenhum usuário cadastrado.");
+    $("#selUsuario").innerHTML = usuarios.map((u) => `<option value="${u.id}">${esc(u.nome)}</option>`).join("");
+    if (usuarios.some((u) => String(u.id) === atual)) $("#selUsuario").value = atual;
+    await carregarExtrato();
+}
+
+async function carregarProdutos() {
+    const produtos = await api("/api/out_stock");
+    $("#listaProdutos").innerHTML = produtos.length
+        ? produtos.map((p) => `<tr><td>${p.id}</td><td><code>${esc(p.codigo)}</code></td><td>${esc(p.descricao)}</td>
+            <td>${dataBR(p.data_solicitacao)}</td>
+            <td class="actions-cell"><button class="action-btn" title="Remover" onclick="remover(${p.id})">🗑️</button></td></tr>`).join("")
+        : vazio(5, "Nenhum produto em falta.");
+}
+
+async function remover(id) {
+    await api(`/api/out_stock/${id}`, { method: "DELETE" });
+    aviso("✅ Produto removido.");
+    carregarProdutos();
+}
+
+function aoEnviar(seletor, enviar, mensagem, recarregar) {
+    $(seletor).addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const dados = Object.fromEntries(new FormData(e.target));
+        try {
+            await enviar(dados);
+            e.target.querySelectorAll("input").forEach((i) => (i.value = ""));
+            aviso(mensagem);
+            recarregar();
+        } catch {}
+    });
+}
+
+aoEnviar("#formUsuario", (d) => api("/api/usuarios", { method: "POST", body: JSON.stringify(d) }),
+    "✅ Usuário criado.", carregarUsuarios);
+aoEnviar("#formTransacao", (d) => api(`/api/usuarios/${d.usuario_id}/transacoes`,
+    { method: "POST", body: JSON.stringify({ tipo: d.tipo, valor: d.valor }) }),
+    "✅ Transação lançada.", carregarUsuarios);
+aoEnviar("#formProduto", (d) => {
+    if (!d.data_solicitacao) delete d.data_solicitacao;
+    return api("/api/out_stock", { method: "POST", body: JSON.stringify(d) });
+}, "✅ Produto adicionado.", carregarProdutos);
+$("#selUsuario").addEventListener("change", carregarExtrato);
+
+checarSaude();
+if ({{ 'true' if banco_configurado else 'false' }}) {
+    carregarUsuarios().catch(() => {});
+    carregarProdutos().catch(() => {});
+}
+</script>
+</body>
+</html>
